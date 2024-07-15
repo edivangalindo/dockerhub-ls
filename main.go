@@ -1,25 +1,40 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
-	"strconv"
 )
 
-type ImagesResponse struct {
-	Count    int     `json:"count"`
-	Next     string  `json:"next"`
-	Previous string  `json:"previous"`
-	Results  []Image `json:"results"`
+type RepositoryResponse struct {
+	Count    int          `json:"count"`
+	Next     string       `json:"next"`
+	Previous string       `json:"previous"`
+	Results  []Repository `json:"results"`
 }
 
-type Image struct {
-	Name string `json:"name"`
+type Repository struct {
+	Name               string   `json:"name"`
+	Namespace          string   `json:"namespace"`
+	Repository_type    string   `json:"repository_type"`
+	Status             int      `json:"status"`
+	Status_description string   `json:"status_description"`
+	Description        string   `json:"description"`
+	Is_private         bool     `json:"is_private"`
+	Star_count         int      `json:"star_count"`
+	Pull_count         int      `json:"pull_count"`
+	Last_updated       string   `json:"last_updated"`
+	Date_registered    string   `json:"date_registered"`
+	Affiliation        string   `json:"affiliation"`
+	Media_types        []string `json:"media_types"`
+	Content_types      []string `json:"content_types"`
+	Categories         []string `json:"categories"`
 }
 
-type TagsResponse struct {
+type TagResponse struct {
 	Count    int    `json:"count"`
 	Next     string `json:"next"`
 	Previous string `json:"previous"`
@@ -27,7 +42,42 @@ type TagsResponse struct {
 }
 
 type Tag struct {
-	Name string `json:"name"`
+	Creator               int    `json:"creator"`
+	Id                    int    `json:"id"`
+	Images                string `json:"images"`
+	Last_updated          string `json:"last_updated"`
+	Last_updater          int    `json:"last_updater"`
+	Last_updater_username string `json:"last_updater_username"`
+	Name                  string `json:"name"`
+	Repository            int    `json:"repository"`
+	Full_size             int    `json:"full_size"`
+	V2                    bool   `json:"v2"`
+	Tag_status            string `json:"tag_status"`
+	Tag_last_pulled       string `json:"tag_last_pulled"`
+	Tag_last_pushed       string `json:"tag_last_pushed"`
+	Media_type            string `json:"media_type"`
+	Content_type          string `json:"content_type"`
+}
+
+type Member struct {
+	Login               string `json:"login"`
+	Id                  int    `json:"id"`
+	Node_id             string `json:"node_id"`
+	Avatar_url          string `json:"avatar_url"`
+	Gravatar_id         string `json:"gravatar_id"`
+	Url                 string `json:"url"`
+	Html_url            string `json:"html_url"`
+	Followers_url       string `json:"followers_url"`
+	Following_url       string `json:"following_url"`
+	Gists_url           string `json:"gists_url"`
+	Starred_url         string `json:"starred_url"`
+	Subscriptions_url   string `json:"subscriptions_url"`
+	Organizations_url   string `json:"organizations_url"`
+	Repos_url           string `json:"repos_url"`
+	Events_url          string `json:"events_url"`
+	Received_events_url string `json:"received_events_url"`
+	Type                string `json:"type"`
+	Site_admin          string `json:"site_admin"`
 }
 
 func main() {
@@ -50,85 +100,95 @@ func main() {
 		users = append(users, user)
 	}
 
-	for _, user := range users {
-		printImageNames(user)
+	for i, user := range users {
+		if i != 0 && i%1000 == 0 {
+			promptForIPChange()
+		}
+		check_user_exist(user)
 	}
 
 }
 
-// Using docker api get a list of images with tags from a dockerhub user
-// and print them to stdout
-func printImageNames(user string) {
-	api := "https://hub.docker.com/v2/repositories/" + user + "/"
+func promptForIPChange() {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println("Por favor, troque de IP e pressione Enter para continuar...")
+	reader.ReadString('\n')
+}
 
-	client := &http.Client{}
+func get_tags(username string, repository string) {
+	docker_hub_tags_url := fmt.Sprintf("https://hub.docker.com/v2/namespaces/%s/repositories/%s/tags", username, repository)
 
-	var images []Image
+	resp, err := http.Get(docker_hub_tags_url)
 
-	page := 1
-	for {
-		url := api + "?pagesize=100&page=" + strconv.Itoa(page)
-
-		req, err := http.NewRequest("GET", url, nil)
-		if err != nil {
-			panic(err)
-		}
-
-		resp, err := client.Do(req)
-		if err != nil {
-			panic(err)
-		}
-
-		var imagesResponse ImagesResponse
-
-		err = json.NewDecoder(resp.Body).Decode(&imagesResponse)
-		if err != nil {
-			panic(err)
-		}
-
-		images = append(images, imagesResponse.Results...)
-
-		if imagesResponse.Next == "" {
-			break
-		}
-
-		page++
+	if err != nil {
+		fmt.Println("[-] Erro ao checar existencia de tags")
+		return
 	}
 
-	page = 1
-	// Get tag for each image
-	for _, image := range images {
-		url := api + image.Name + "/tags" + "?pagesize=100&page=" + strconv.Itoa(page)
-
-		req, err := http.NewRequest("GET", url, nil)
+	if resp.StatusCode == 200 {
+		resp_body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			panic(err)
+			fmt.Println("[-] Erro ao ler resposta da obtenção de tags")
+			return
 		}
 
-		resp, err := client.Do(req)
+		var tag_resp TagResponse
+
+		json.Unmarshal(resp_body, &tag_resp)
+
+		if tag_resp.Count != 0 {
+			for s, _ := range tag_resp.Results {
+				// Imprime a imagem com tag se existir
+				fmt.Printf("%s/%s:%s\n", username, repository, tag_resp.Results[s].Name)
+			}
+		} else {
+			// Imprime a imagem sem tag se não existir
+			fmt.Printf("%s/%s\n", username, repository)
+		}
+	}
+}
+
+func get_repositories(username string) {
+	docker_hub_repositories_url := fmt.Sprintf("https://hub.docker.com/v2/namespaces/%s/repositories", username)
+
+	resp, err := http.Get(docker_hub_repositories_url)
+
+	if err != nil {
+		fmt.Println("[-] Erro ao checar existência de repositorios")
+		return
+	}
+
+	if resp.StatusCode == 200 {
+		resp_body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			panic(err)
+			fmt.Println("[-] Erro ao ler resposta da checagem de repositórios")
+			return
 		}
 
-		var tagsResponse TagsResponse
+		var repo_resp RepositoryResponse
 
-		err = json.NewDecoder(resp.Body).Decode(&tagsResponse)
-		if err != nil {
-			panic(err)
+		json.Unmarshal(resp_body, &repo_resp)
+
+		if repo_resp.Count != 0 {
+			for s, _ := range repo_resp.Results {
+				get_tags(username, repo_resp.Results[s].Name)
+			}
 		}
+	}
+}
 
-		if tagsResponse.Results == nil {
-			continue
-		}
+func check_user_exist(username string) {
 
-		for _, tag := range tagsResponse.Results {
-			fmt.Println(user + "/" + image.Name + ":" + tag.Name)
-		}
+	docker_hub_user_base_url := "https://hub.docker.com/u/"
 
-		if tagsResponse.Next == "" {
-			break
-		}
+	resp, err := http.Get(docker_hub_user_base_url + username)
 
-		page++
+	if err != nil {
+		fmt.Println("[-] Erro ao checar existência do usuário")
+		return
+	}
+
+	if resp.StatusCode == 200 {
+		get_repositories(username)
 	}
 }
