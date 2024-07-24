@@ -1,12 +1,13 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"time"
 )
 
 type RepositoryResponse struct {
@@ -59,28 +60,21 @@ type Tag struct {
 	Content_type          string `json:"content_type"`
 }
 
-type Member struct {
-	Login               string `json:"login"`
-	Id                  int    `json:"id"`
-	Node_id             string `json:"node_id"`
-	Avatar_url          string `json:"avatar_url"`
-	Gravatar_id         string `json:"gravatar_id"`
-	Url                 string `json:"url"`
-	Html_url            string `json:"html_url"`
-	Followers_url       string `json:"followers_url"`
-	Following_url       string `json:"following_url"`
-	Gists_url           string `json:"gists_url"`
-	Starred_url         string `json:"starred_url"`
-	Subscriptions_url   string `json:"subscriptions_url"`
-	Organizations_url   string `json:"organizations_url"`
-	Repos_url           string `json:"repos_url"`
-	Events_url          string `json:"events_url"`
-	Received_events_url string `json:"received_events_url"`
-	Type                string `json:"type"`
-	Site_admin          string `json:"site_admin"`
-}
-
 func main() {
+	// Parse the flags
+	lastDays := flag.Int("ld", 0, "Filter images uploaded in the last 'n' days")
+	help := flag.Bool("help", false, "Show help message")
+	flag.Parse()
+
+	if *help {
+		fmt.Println("Usage: dockerhub-ls [options]")
+		fmt.Println("Options:")
+		fmt.Println("  -ld int")
+		fmt.Println("        Filter images uploaded in the last 'n' days (default 0, which means all images)")
+		fmt.Println("  -help")
+		fmt.Println("        Show this help message")
+		return
+	}
 
 	// Check for stdin input
 	stat, _ := os.Stdin.Stat()
@@ -100,35 +94,25 @@ func main() {
 		users = append(users, user)
 	}
 
-	for i, user := range users {
-		if i != 0 && i%1000 == 0 {
-			promptForIPChange()
-		}
-		check_user_exist(user)
+	for _, user := range users {
+		check_user_exist(user, *lastDays)
 	}
-
 }
 
-func promptForIPChange() {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Println("Por favor, troque de IP e pressione Enter para continuar...")
-	reader.ReadString('\n')
-}
-
-func get_tags(username string, repository string) {
+func get_tags(username string, repository string, lastDays int) {
 	docker_hub_tags_url := fmt.Sprintf("https://hub.docker.com/v2/namespaces/%s/repositories/%s/tags", username, repository)
 
 	resp, err := http.Get(docker_hub_tags_url)
 
 	if err != nil {
-		fmt.Println("[-] Erro ao checar existencia de tags")
+		fmt.Println("[-] Error checking for tags")
 		return
 	}
 
 	if resp.StatusCode == 200 {
 		resp_body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			fmt.Println("[-] Erro ao ler resposta da obtenção de tags")
+			fmt.Println("[-] Error reading tag response")
 			return
 		}
 
@@ -137,31 +121,38 @@ func get_tags(username string, repository string) {
 		json.Unmarshal(resp_body, &tag_resp)
 
 		if tag_resp.Count != 0 {
-			for s, _ := range tag_resp.Results {
-				// Imprime a imagem com tag se existir
-				fmt.Printf("%s/%s:%s\n", username, repository, tag_resp.Results[s].Name)
+			for s := range tag_resp.Results {
+				lastUpdated, err := time.Parse(time.RFC3339, tag_resp.Results[s].Last_updated)
+				if err != nil {
+					fmt.Printf("Error parsing time: %v\n", err)
+					continue
+				}
+				if lastDays == 0 || time.Since(lastUpdated) <= time.Duration(lastDays)*24*time.Hour {
+					fmt.Printf("%s/%s:%s\n", username, repository, tag_resp.Results[s].Name)
+				}
 			}
-		} else {
-			// Imprime a imagem sem tag se não existir
-			fmt.Printf("%s/%s\n", username, repository)
 		}
+		// else {
+		// 	// Print the image without a tag if none exist
+		// 	fmt.Printf("%s/%s\n", username, repository)
+		// }
 	}
 }
 
-func get_repositories(username string) {
+func get_repositories(username string, lastDays int) {
 	docker_hub_repositories_url := fmt.Sprintf("https://hub.docker.com/v2/namespaces/%s/repositories", username)
 
 	resp, err := http.Get(docker_hub_repositories_url)
 
 	if err != nil {
-		fmt.Println("[-] Erro ao checar existência de repositorios")
+		fmt.Println("[-] Error checking for repositories")
 		return
 	}
 
 	if resp.StatusCode == 200 {
 		resp_body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			fmt.Println("[-] Erro ao ler resposta da checagem de repositórios")
+			fmt.Println("[-] Error reading repository response")
 			return
 		}
 
@@ -170,25 +161,24 @@ func get_repositories(username string) {
 		json.Unmarshal(resp_body, &repo_resp)
 
 		if repo_resp.Count != 0 {
-			for s, _ := range repo_resp.Results {
-				get_tags(username, repo_resp.Results[s].Name)
+			for s := range repo_resp.Results {
+				get_tags(username, repo_resp.Results[s].Name, lastDays)
 			}
 		}
 	}
 }
 
-func check_user_exist(username string) {
-
+func check_user_exist(username string, lastDays int) {
 	docker_hub_user_base_url := "https://hub.docker.com/u/"
 
 	resp, err := http.Get(docker_hub_user_base_url + username)
 
 	if err != nil {
-		fmt.Println("[-] Erro ao checar existência do usuário")
+		fmt.Println("[-] Error checking for user existence")
 		return
 	}
 
 	if resp.StatusCode == 200 {
-		get_repositories(username)
+		get_repositories(username, lastDays)
 	}
 }
