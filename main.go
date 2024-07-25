@@ -60,10 +60,14 @@ type Tag struct {
 	Content_type          string `json:"content_type"`
 }
 
+var silent bool
+
 func main() {
 	// Parse the flags
 	lastDays := flag.Int("ld", 0, "Filter images uploaded in the last 'n' days")
 	help := flag.Bool("help", false, "Show help message")
+	debug := flag.Bool("debug", false, "Show debug messages")
+	flag.BoolVar(&silent, "silent", false, "Suppress debug and error messages")
 	flag.Parse()
 
 	if *help {
@@ -73,6 +77,10 @@ func main() {
 		fmt.Println("        Filter images uploaded in the last 'n' days (default 0, which means all images)")
 		fmt.Println("  -help")
 		fmt.Println("        Show this help message")
+		fmt.Println("  -debug")
+		fmt.Println("        Show debug messages")
+		fmt.Println("  -silent")
+		fmt.Println("        Suppress debug and error messages")
 		return
 	}
 
@@ -95,25 +103,29 @@ func main() {
 	}
 
 	for _, user := range users {
-		check_user_exist(user, *lastDays)
+		check_user_exist(user, *lastDays, *debug)
 	}
 }
 
-func get_tags(username string, repository string, lastDays int) {
+func get_tags(username string, repository string, lastDays int, debug bool) {
 	docker_hub_tags_url := fmt.Sprintf("https://hub.docker.com/v2/namespaces/%s/repositories/%s/tags", username, repository)
 
 	resp, err := http.Get(docker_hub_tags_url)
 
 	if err != nil {
-		fmt.Println("[-] Error checking for tags")
+		log("Error checking for tags")
 		return
 	}
 
 	if resp.StatusCode == 200 {
 		resp_body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			fmt.Println("[-] Error reading tag response")
+			log("Error reading tag response")
 			return
+		}
+
+		if debug {
+			log(fmt.Sprintf("Response body: %s", resp_body))
 		}
 
 		var tag_resp TagResponse
@@ -124,7 +136,7 @@ func get_tags(username string, repository string, lastDays int) {
 			for s := range tag_resp.Results {
 				lastUpdated, err := time.Parse(time.RFC3339, tag_resp.Results[s].Last_updated)
 				if err != nil {
-					fmt.Printf("Error parsing time: %v\n", err)
+					log(fmt.Sprintf("Error parsing time: %v", err))
 					continue
 				}
 				if lastDays == 0 || time.Since(lastUpdated) <= time.Duration(lastDays)*24*time.Hour {
@@ -139,21 +151,25 @@ func get_tags(username string, repository string, lastDays int) {
 	}
 }
 
-func get_repositories(username string, lastDays int) {
+func get_repositories(username string, lastDays int, debug bool) {
 	docker_hub_repositories_url := fmt.Sprintf("https://hub.docker.com/v2/namespaces/%s/repositories", username)
 
 	resp, err := http.Get(docker_hub_repositories_url)
 
 	if err != nil {
-		fmt.Println("[-] Error checking for repositories")
+		log("Error checking for repositories")
 		return
 	}
 
 	if resp.StatusCode == 200 {
 		resp_body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			fmt.Println("[-] Error reading repository response")
+			log("Error reading repository response")
 			return
+		}
+
+		if debug {
+			log(fmt.Sprintf("Response body: %s", resp_body))
 		}
 
 		var repo_resp RepositoryResponse
@@ -162,23 +178,29 @@ func get_repositories(username string, lastDays int) {
 
 		if repo_resp.Count != 0 {
 			for s := range repo_resp.Results {
-				get_tags(username, repo_resp.Results[s].Name, lastDays)
+				get_tags(username, repo_resp.Results[s].Name, lastDays, debug)
 			}
 		}
 	}
 }
 
-func check_user_exist(username string, lastDays int) {
+func check_user_exist(username string, lastDays int, debug bool) {
 	docker_hub_user_base_url := "https://hub.docker.com/u/"
 
 	resp, err := http.Get(docker_hub_user_base_url + username)
 
 	if err != nil {
-		fmt.Println("[-] Error checking for user existence")
+		log("Error checking for user existence")
 		return
 	}
 
 	if resp.StatusCode == 200 {
-		get_repositories(username, lastDays)
+		get_repositories(username, lastDays, debug)
+	}
+}
+
+func log(message string) {
+	if !silent {
+		fmt.Println(message)
 	}
 }
