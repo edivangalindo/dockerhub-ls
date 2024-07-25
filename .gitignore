@@ -21,3 +21,6 @@
 go.work
 
 *.txt
+dockerhub-ls
+scan-images-from-output-txt-with-trufflehog.sh
+.vscode/launch.json
