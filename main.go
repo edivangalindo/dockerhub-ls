@@ -109,12 +109,15 @@ func main() {
 
 func get_tags(username string, repository string, lastDays int, debug bool) {
 	docker_hub_tags_url := fmt.Sprintf("https://hub.docker.com/v2/namespaces/%s/repositories/%s/tags", username, repository)
-
-	resp, err := http.Get(docker_hub_tags_url)
+	resp, err := makeRequestWithRetries(docker_hub_tags_url)
 
 	if err != nil {
 		log("Error checking for tags")
 		return
+	}
+
+	if debug {
+		log(fmt.Sprintf("Get tags - Status code: %v", resp.StatusCode))
 	}
 
 	if resp.StatusCode == 200 {
@@ -153,12 +156,15 @@ func get_tags(username string, repository string, lastDays int, debug bool) {
 
 func get_repositories(username string, lastDays int, debug bool) {
 	docker_hub_repositories_url := fmt.Sprintf("https://hub.docker.com/v2/namespaces/%s/repositories", username)
-
-	resp, err := http.Get(docker_hub_repositories_url)
+	resp, err := makeRequestWithRetries(docker_hub_repositories_url)
 
 	if err != nil {
 		log("Error checking for repositories")
 		return
+	}
+
+	if debug {
+		log(fmt.Sprintf("Get repositories - Status code: %v", resp.StatusCode))
 	}
 
 	if resp.StatusCode == 200 {
@@ -186,17 +192,42 @@ func get_repositories(username string, lastDays int, debug bool) {
 
 func check_user_exist(username string, lastDays int, debug bool) {
 	docker_hub_user_base_url := "https://hub.docker.com/u/"
-
-	resp, err := http.Get(docker_hub_user_base_url + username)
+	resp, err := makeRequestWithRetries(docker_hub_user_base_url + username)
 
 	if err != nil {
 		log("Error checking for user existence")
 		return
 	}
 
+	if debug {
+		log(fmt.Sprintf("Check if user exist - Status code: %v", resp.StatusCode))
+	}
+
 	if resp.StatusCode == 200 {
 		get_repositories(username, lastDays, debug)
 	}
+}
+
+func makeRequestWithRetries(url string) (*http.Response, error) {
+	var resp *http.Response
+	var err error
+	delay := time.Second
+
+	for {
+		resp, err = http.Get(url)
+		if err != nil {
+			return nil, err
+		}
+
+		if resp.StatusCode != 429 {
+			break
+		}
+
+		time.Sleep(delay)
+		delay *= 2
+	}
+
+	return resp, nil
 }
 
 func log(message string) {
